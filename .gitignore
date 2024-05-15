@@ -1,0 +1,5 @@
+/build
+/build-clang
+.cache
+/compile_commands.json
+
