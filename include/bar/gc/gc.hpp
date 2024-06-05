@@ -335,8 +335,9 @@ template <class PixFmt> struct agg_gc_t {
         // attempt to skip over garbage and resume
         txt.remove_prefix(1);
         codepoint = 0; // draw a tofu
+      } else {
+        txt.remove_prefix(sz);
       }
-      txt.remove_prefix(sz);
       codepoints.emplace_back(codepoint);
     }
 
