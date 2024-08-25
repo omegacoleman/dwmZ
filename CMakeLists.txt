@@ -21,7 +21,7 @@ pkg_check_modules(FontConfig REQUIRED fontconfig IMPORTED_TARGET)
 pkg_check_modules(PNG REQUIRED libpng16 IMPORTED_TARGET)
 
 if(${WITH_WP})
-  pkg_check_modules(WirePlumber REQUIRED wireplumber-0.4 IMPORTED_TARGET)
+  pkg_check_modules(WirePlumber REQUIRED wireplumber-0.5 IMPORTED_TARGET)
 endif()
 
 if(${WITH_FCITX})

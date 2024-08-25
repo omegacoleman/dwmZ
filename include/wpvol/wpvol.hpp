@@ -26,6 +26,7 @@ void on_om_installed(wp_vol_t *self);
 void on_mixer_changed(wp_vol_t *self);
 void on_def_nodes_changed(wp_vol_t *self);
 void on_plugin_activated(WpObject *p, GAsyncResult *res, wp_vol_t *self);
+void on_plugin_loaded(WpObject *p, GAsyncResult *res, wp_vol_t *self);
 
 struct wp_vol_t {
 public:
@@ -34,6 +35,7 @@ public:
   friend void on_mixer_changed(wp_vol_t *self);
   friend void on_def_nodes_changed(wp_vol_t *self);
   friend void on_plugin_activated(WpObject *p, GAsyncResult *res, wp_vol_t *self);
+  friend void on_plugin_loaded(WpObject *p, GAsyncResult *res, wp_vol_t *self);
 
   wp_vol_t() {}
 
@@ -95,24 +97,16 @@ private:
 
     mc_ = g_main_context_new();
     loop_ = g_main_loop_new(g_main_context_get_thread_default(), false);
-    core_ = wp_core_new(g_main_context_get_thread_default(), nullptr);
+    core_ = wp_core_new(g_main_context_get_thread_default(), nullptr, nullptr);
 
     om_ = wp_object_manager_new();
     wp_object_manager_add_interest(om_, WP_TYPE_NODE, nullptr);
     wp_object_manager_add_interest(om_, WP_TYPE_CLIENT, nullptr);
     wp_object_manager_request_object_features(om_, WP_TYPE_GLOBAL_PROXY, WP_PIPEWIRE_OBJECT_FEATURES_MINIMAL);
 
-    if(!wp_core_load_component(core_, "libwireplumber-module-default-nodes-api", "module", nullptr, &error_)) {
-      handle_gerror(error_);
-      return;
-    }
-    if(!wp_core_load_component(core_, "libwireplumber-module-mixer-api", "module", nullptr, &error_)) {
-      handle_gerror(error_);
-      return;
-    }
-    def_nodes_api_ = wp_plugin_find(core_, "default-nodes-api");
-    mixer_api_ = wp_plugin_find(core_, "mixer-api");
-    g_object_set(G_OBJECT(mixer_api_), "scale", 1 /* cubic */, nullptr);
+    loading_plugins_ = 2;
+    wp_core_load_component(core_, "libwireplumber-module-default-nodes-api", "module", nullptr, nullptr, nullptr, (GAsyncReadyCallback)on_plugin_loaded, this);
+    wp_core_load_component(core_, "libwireplumber-module-mixer-api", "module", nullptr, nullptr, nullptr, (GAsyncReadyCallback)on_plugin_loaded, this);
 
     if(!wp_core_connect(core_)) {
       handle_error("Could not connect to PipeWire");
@@ -122,13 +116,26 @@ private:
     g_signal_connect_swapped(core_, "disconnected", (GCallback)on_core_disconnected, this);
     g_signal_connect_swapped(om_, "installed", (GCallback)on_om_installed, this);
 
-    pending_plugins_ = 2;
-    wp_object_activate(WP_OBJECT(def_nodes_api_), WP_PLUGIN_FEATURE_ENABLED, nullptr, (GAsyncReadyCallback)on_plugin_activated, this);
-    wp_object_activate(WP_OBJECT(mixer_api_), WP_PLUGIN_FEATURE_ENABLED, nullptr, (GAsyncReadyCallback)on_plugin_activated, this);
-
     g_main_loop_run(loop_);
 
     clear();
+  }
+
+  void handle_plugin_loaded(WpObject *p, GAsyncResult *res) {
+    if(!wp_core_load_component_finish(core_, res, &error_)) {
+      handle_gerror(error_);
+      return;
+    }
+
+    if(--loading_plugins_ == 0) {
+      def_nodes_api_ = wp_plugin_find(core_, "default-nodes-api");
+      mixer_api_ = wp_plugin_find(core_, "mixer-api");
+      g_object_set(G_OBJECT(mixer_api_), "scale", 1 /* cubic */, nullptr);
+
+      pending_plugins_ = 2;
+      wp_object_activate(WP_OBJECT(def_nodes_api_), WP_PLUGIN_FEATURE_ENABLED, nullptr, (GAsyncReadyCallback)on_plugin_activated, this);
+      wp_object_activate(WP_OBJECT(mixer_api_), WP_PLUGIN_FEATURE_ENABLED, nullptr, (GAsyncReadyCallback)on_plugin_activated, this);
+    }
   }
 
   void handle_plugin_activated(WpObject *p, GAsyncResult *res) {
@@ -206,6 +213,7 @@ private:
   WpPlugin *def_nodes_api_ = nullptr;
   WpPlugin *mixer_api_ = nullptr;
 
+  guint loading_plugins_ = 0;
   guint pending_plugins_ = 0;
 
   double cached_vol_ = 0.0;
@@ -227,5 +235,6 @@ inline void on_om_installed(wp_vol_t *self) { self->handle_om_installed(); }
 inline void on_mixer_changed(wp_vol_t *self) { self->handle_mixer_changed(); }
 inline void on_def_nodes_changed(wp_vol_t *self) { self->handle_def_nodes_changed(); }
 inline void on_plugin_activated(WpObject *p, GAsyncResult *res, wp_vol_t *self) { self->handle_plugin_activated(p, res); }
+inline void on_plugin_loaded(WpObject *p, GAsyncResult *res, wp_vol_t *self) { self->handle_plugin_loaded(p, res); }
 
 }
