@@ -362,7 +362,7 @@ template <class PixFmt> struct agg_gc_t {
 
     using color_type = typename PixFmt::color_type;
     using span_interpolator_type = agg::span_interpolator_linear<>;
-    using color_func_type = agg::gradient_lut<agg::color_interpolator<color_type>, 256>;
+    using color_func_type = agg::gradient_lut<agg::color_interpolator<color_type>, 65536>;
     using gradient_type = agg::gradient_x;
 
     agg::trans_affine trans;
@@ -376,12 +376,16 @@ template <class PixFmt> struct agg_gc_t {
 
     auto color = panel_fg_color(flavor);
     auto color_fade = color;
+    // color_fade.r = 0;
+    // color_fade.g = 0;
+    // color_fade.b = 0;
     color_fade.a = 0;
     colors.add_color(0.0, color);
-    colors.add_color(0.8, color);
+    colors.add_color(0.4, color);
+    colors.add_color(0.5, color_fade);
     colors.add_color(1.0, color_fade);
     colors.build_lut();
-    agg::span_gradient<color_type, span_interpolator_type, gradient_type, color_func_type> span_gen{ inter, gr, colors, 0, w };
+    agg::span_gradient<color_type, span_interpolator_type, gradient_type, color_func_type> span_gen{ inter, gr, colors, 0, w * 2 };
 
     if(!fade_out) {
       ren_solid_.color(color);
