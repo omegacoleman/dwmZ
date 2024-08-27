@@ -25,7 +25,7 @@ if(${WITH_WP})
 endif()
 
 if(${WITH_FCITX})
-  pkg_check_modules(DBus REQUIRED dbus-1 IMPORTED_TARGET)
+  add_subdirectory(fcitx5-dwmzpanel)
 endif()
 
 pkg_check_modules(FontConfig REQUIRED fontconfig IMPORTED_TARGET)

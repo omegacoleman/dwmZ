@@ -1,0 +1,9 @@
+[Addon]
+Name=DwmZ Panel Integration
+Name[zh_CN]=DwmZ面板集成
+Category=Module
+Library=libdwmzpanel
+Type=SharedLibrary
+OnDemand=False
+Configurable=True
+

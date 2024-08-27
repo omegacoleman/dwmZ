@@ -25,11 +25,5 @@ else()
   target_compile_definitions(dwmz PRIVATE DWMZ_NO_WP)
 endif()
 
-if(${WITH_FCITX})
-  target_link_libraries(dwmz PRIVATE PkgConfig::DBus)
-else()
-  target_compile_definitions(dwmz PRIVATE DWMZ_NO_FCITX)
-endif()
-
 install(TARGETS dwmz)
 

@@ -30,10 +30,6 @@
 #include <X11/X.h>
 #include <X11/extensions/Xrender.h>
 
-#ifndef DWMZ_NO_FCITX
-#include "fcitxim/fcitxim.hpp"
-#endif
-
 #ifndef DWMZ_NO_WP
 #include "wpvol/wpvol.hpp"
 #endif
@@ -111,6 +107,13 @@ enum {
 };                                                                                              /* EWMH atoms */
 enum { WMProtocols, WMDelete, WMState, WMTakeFocus, WMLast };                                   /* default atoms */
 enum { ClkTagBar, ClkLtSymbol, ClkStatusText, ClkWinTitle, ClkClientWin, ClkRootWin, ClkLast }; /* clicks */
+
+enum {
+  DwmzAtomPanel0Text,
+  DwmzAtomPanel1Text,
+  DwmzAtomPanel2Text,
+  DwmzAtomLast
+};
 
 typedef union {
   int i;
@@ -195,10 +198,6 @@ typedef struct {
   int isfloating;
   int monitor;
 } Rule;
-
-#ifndef DWMZ_NO_FCITX
-static fcitxim::fcitximc_t imc;
-#endif
 
 #ifndef DWMZ_NO_WP
 static wpvol::wp_vol_t vol;
@@ -295,7 +294,8 @@ static void updateclientlist(void);
 static int updategeom(void);
 static void updatenumlockmask(void);
 static void updatesizehints(Client *c);
-static void updatestatus(void);
+static void updatetextprop(Atom atom, char* dest, size_t sz, const char* deftext);
+static void updatealltextprop(void);
 static void updatetitle(Client *c);
 static void updatewindowtype(Client *c);
 static void updatewmhints(Client *c);
@@ -310,7 +310,15 @@ static void zoom(const Arg *arg);
 
 /* variables */
 static const char broken[] = "broken";
-static char stext[256];
+
+#define DWMZ_TXT_SZ 256
+
+static char stext[DWMZ_TXT_SZ];
+
+#define DWMZ_TXTPANEL_COUNT 3
+
+static char paneltext[DWMZ_TXT_SZ][DWMZ_TXTPANEL_COUNT];
+
 static int screen;
 static int sw, sh; /* X display screen geometry width, height */
 static int bh;     /* bar height */
@@ -328,7 +336,7 @@ static std::map<int, void (*)(XEvent *)> handler{ { ButtonPress, buttonpress },
                                                   { MapRequest, maprequest },
                                                   { PropertyNotify, propertynotify },
                                                   { UnmapNotify, unmapnotify } };
-static Atom wmatom[WMLast], netatom[NetLast];
+static Atom wmatom[WMLast], netatom[NetLast], dwmzatom[DwmzAtomLast];
 static Cur *cursor[CurLast];
 static Display *dpy;
 static Drw *drw;
@@ -989,17 +997,8 @@ void drawbar(Monitor *m) {
   gc.draw_volbar_panel(vshow, layo.volume_, attr, bar::panel_flavor_t::volume);
 #endif
 
-#ifndef DWMZ_NO_FCITX
-  std::string im_is = "-";
-  std::string im_s = imc.get_im();
-  if(im_s == "keyboard-us") {
-    im_is = "EN";
-  }
-  if(im_s == "pinyin") {
-    im_is = "拼";
-  }
-  gc.draw_text_panel(im_is, layo.im_, attr, bar::panel_flavor_t::im);
-#endif
+  // TODO draw to custom panel space
+  gc.draw_text_panel(std::string{paneltext[0]}, layo.im_, attr, bar::panel_flavor_t::im);
 
   XPutImage(dpy, m->barwin, drw->gc, &m->barimg, 0, 0, 0, 0, m->ww, bh);
   XSync(drw->dpy, False);
@@ -1449,9 +1448,22 @@ void propertynotify(XEvent *e) {
   Window trans;
   XPropertyEvent *ev = &e->xproperty;
 
-  if((ev->window == root) && (ev->atom == XA_WM_NAME))
-    updatestatus();
-  else if(ev->state == PropertyDelete)
+  if (ev->window == root) {
+    if (ev->atom == XA_WM_NAME) {
+      updatetextprop(ev->atom, stext, DWMZ_TXT_SZ, "dwmZ");
+      return;
+    } else if (ev->atom == dwmzatom[DwmzAtomPanel0Text]) {
+      updatetextprop(ev->atom, paneltext[0], DWMZ_TXT_SZ, "");
+      return;
+    } else if (ev->atom == dwmzatom[DwmzAtomPanel1Text]) {
+      updatetextprop(ev->atom, paneltext[1], DWMZ_TXT_SZ, "");
+      return;
+    } else if (ev->atom == dwmzatom[DwmzAtomPanel2Text]) {
+      updatetextprop(ev->atom, paneltext[0], DWMZ_TXT_SZ, "");
+      return;
+    }
+  }
+  if(ev->state == PropertyDelete)
     return; /* ignore */
   else if((c = wintoclient(ev->window))) {
     switch(ev->atom) {
@@ -1668,10 +1680,6 @@ void run(void) {
   vol.on_update([]() { a_drawbars.send(); });
   vol.run();
 #endif
-#ifndef DWMZ_NO_FCITX
-  imc.on_update([]() { a_drawbars.send(); });
-  imc.run();
-#endif
 
   XEvent ev;
   /* main event loop */
@@ -1842,6 +1850,9 @@ void setup(void) {
   netatom[NetWMWindowType] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
   netatom[NetWMWindowTypeDialog] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
   netatom[NetClientList] = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
+  dwmzatom[DwmzAtomPanel0Text] = XInternAtom(dpy, "DWMZ_PANEL0_TEXT", False);
+  dwmzatom[DwmzAtomPanel1Text] = XInternAtom(dpy, "DWMZ_PANEL1_TEXT", False);
+  dwmzatom[DwmzAtomPanel2Text] = XInternAtom(dpy, "DWMZ_PANEL2_TEXT", False);
   /* init cursors */
   cursor[CurNormal] = drw_cur_create(drw, XC_left_ptr);
   cursor[CurResize] = drw_cur_create(drw, XC_sizing);
@@ -1849,7 +1860,8 @@ void setup(void) {
   /* init bars */
   updatebars();
   updatebgs();
-  updatestatus();
+  updatealltextprop();
+
   /* supporting window for NetWMCheck */
   wmcheckwin = XCreateSimpleWindow(dpy, root, 0, 0, 1, 1, 0, 0, 0);
   XChangeProperty(dpy, wmcheckwin, netatom[NetWMCheck], XA_WINDOW, 32, PropModeReplace, (unsigned char *)&wmcheckwin, 1);
@@ -2125,9 +2137,10 @@ void updatebars(void) {
 #ifndef DWMZ_NO_WP
     flags |= bar::layout_flags::has_volume;
 #endif
-#ifndef DWMZ_NO_FCITX
+
+    // TODO layout custom panels properly
     flags |= bar::layout_flags::has_im;
-#endif
+
     m->barlayo = bar::layout_wmbar(m->ww, bh, LENGTH(tags), flags);
     m->bardata.resize(m->ww * bh * 4);
     m->barimg.width = m->ww;
@@ -2338,9 +2351,21 @@ void updatesizehints(Client *c) {
   c->hintsvalid = 1;
 }
 
-void updatestatus(void) {
-  if(!gettextprop(root, XA_WM_NAME, stext, sizeof(stext)))
-    strcpy(stext, "dwmZ");
+void updatetextpropvalue(Atom atom, char* dest, size_t sz, const char* deftext) {
+  if(!gettextprop(root, atom, dest, sz))
+    strcpy(dest, deftext);
+}
+
+void updatetextprop(Atom atom, char* dest, size_t sz, const char* deftext) {
+  updatetextpropvalue(atom, dest, sz, deftext);
+  drawbar(selmon);
+}
+
+void updatealltextprop() {
+  updatetextpropvalue(XA_WM_NAME, stext, DWMZ_TXT_SZ, "dwmZ");
+  updatetextpropvalue(dwmzatom[DwmzAtomPanel0Text], paneltext[0], DWMZ_TXT_SZ, "");
+  updatetextpropvalue(dwmzatom[DwmzAtomPanel1Text], paneltext[1], DWMZ_TXT_SZ, "");
+  updatetextpropvalue(dwmzatom[DwmzAtomPanel2Text], paneltext[2], DWMZ_TXT_SZ, "");
   drawbar(selmon);
 }
 
