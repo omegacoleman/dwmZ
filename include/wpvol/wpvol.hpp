@@ -3,10 +3,8 @@
 #include <chrono>
 #include <functional>
 #include <iostream>
-#include <mutex>
 #include <optional>
 #include <string>
-#include <thread>
 #include <utility>
 
 extern "C" {
@@ -50,7 +48,6 @@ public:
   };
 
   std::optional<result_t> get_result() {
-    std::unique_lock lg{ mut_ };
     if(!cached_valid_ || status_ != status_t::running)
       return std::nullopt;
     result_t res;
@@ -62,14 +59,11 @@ public:
   void on_update(std::function<void()> fn) { on_update_ = fn; }
 
   void run() {
-    thread_ = std::thread{ [this]() { this->routine(); } };
+    routine();
   }
 
-  ~wp_vol_t() {
-    if(thread_.joinable()) {
-      g_main_loop_quit(loop_);
-      thread_.join();
-    }
+  void stop() {
+    g_main_loop_quit(loop_);
   }
 
 private:
@@ -79,7 +73,6 @@ private:
     g_clear_object(&om_);
     g_clear_object(&core_);
     g_clear_pointer(&error_, g_error_free);
-    g_clear_pointer(&mc_, g_main_context_unref);
     g_clear_pointer(&loop_, g_main_loop_unref);
   }
 
@@ -95,7 +88,6 @@ private:
   void routine() {
     wp_init(WP_INIT_ALL);
 
-    mc_ = g_main_context_new();
     loop_ = g_main_loop_new(g_main_context_get_thread_default(), false);
     core_ = wp_core_new(g_main_context_get_thread_default(), nullptr, nullptr);
 
@@ -168,8 +160,6 @@ private:
   }
 
   void update_cache() {
-    std::unique_lock lg{ mut_ };
-
     cached_valid_ = false;
 
     if(status_ != status_t::running)
@@ -194,7 +184,6 @@ private:
     cached_mute_ = mute;
     cached_valid_ = true;
 
-    lg.unlock();
     if(on_update_)
       on_update_();
   }
@@ -203,7 +192,6 @@ private:
 
   void handle_def_nodes_changed() { update_cache(); }
 
-  GMainContext *mc_ = nullptr;
   GMainLoop *loop_ = nullptr;
   GError *error_ = nullptr;
 
@@ -223,9 +211,6 @@ private:
   enum class status_t { error, init, running };
   status_t status_ = status_t::init;
   std::string err_s_ = "";
-
-  std::thread thread_;
-  std::mutex mut_;
 
   std::function<void()> on_update_;
 };

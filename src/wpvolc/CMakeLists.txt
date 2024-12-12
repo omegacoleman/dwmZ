@@ -4,7 +4,7 @@ target_link_libraries(wpvolc PRIVATE
   spdlog::spdlog
   fmt::fmt
   PkgConfig::WirePlumber
-
+  PkgConfig::Xlib
   Threads::Threads
 )
 

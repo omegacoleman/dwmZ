@@ -14,7 +14,7 @@ DwmzPanel::DwmzPanel(Instance *instance) : instance_(instance) {
     return;
   }
   root_ = DefaultRootWindow(dpy_);
-  panel_text_ = XInternAtom(dpy_, "DWMZ_PANEL0_TEXT", False);
+  panel_text_ = XInternAtom(dpy_, "DWMZ_INPUT_METHOD", False);
   utf8string_ = XInternAtom(dpy_, "UTF8_STRING", False);
 
   setPanelText("-");

@@ -30,10 +30,6 @@
 #include <X11/X.h>
 #include <X11/extensions/Xrender.h>
 
-#ifndef DWMZ_NO_WP
-#include "wpvol/wpvol.hpp"
-#endif
-
 #include "agg_basics.h"
 #include "agg_pixfmt_rgb.h"
 #include "agg_pixfmt_rgba.h"
@@ -109,9 +105,8 @@ enum { WMProtocols, WMDelete, WMState, WMTakeFocus, WMLast };                   
 enum { ClkTagBar, ClkLtSymbol, ClkStatusText, ClkWinTitle, ClkClientWin, ClkRootWin, ClkLast }; /* clicks */
 
 enum {
-  DwmzAtomPanel0Text,
-  DwmzAtomPanel1Text,
-  DwmzAtomPanel2Text,
+  DwmzAtomInputMethod,
+  DwmzAtomVolume,
   DwmzAtomLast
 };
 
@@ -199,10 +194,6 @@ typedef struct {
   int monitor;
 } Rule;
 
-#ifndef DWMZ_NO_WP
-static wpvol::wp_vol_t vol;
-#endif
-
 /* function declarations */
 static void applyrules(Client *c);
 static int applysizehints(Client *c, int *x, int *y, int *w, int *h, int interact);
@@ -286,6 +277,7 @@ static void togglehide(const Arg *arg);
 static void unfocus(Client *c, int setfocus);
 static void unmanage(Client *c, int destroyed);
 static void unmapnotify(XEvent *e);
+static bar::layout_flag_t getlayoutflags(void);
 static void updatebarpos(Monitor *m);
 static void updatebars(void);
 static void updatebg(Monitor *m);
@@ -314,10 +306,8 @@ static const char broken[] = "broken";
 #define DWMZ_TXT_SZ 256
 
 static char stext[DWMZ_TXT_SZ];
-
-#define DWMZ_TXTPANEL_COUNT 3
-
-static char paneltext[DWMZ_TXT_SZ][DWMZ_TXTPANEL_COUNT];
+static char da_input_method[DWMZ_TXT_SZ];
+static char da_volume[DWMZ_TXT_SZ];
 
 static int screen;
 static int sw, sh; /* X display screen geometry width, height */
@@ -341,6 +331,7 @@ static Cur *cursor[CurLast];
 static Display *dpy;
 static Drw *drw;
 static Monitor *mons, *selmon;
+static bar::layout_flag_t oldlf = 0;
 static Window root, wmcheckwin;
 static Pixmap bg_pm;
 static GC root_gc;
@@ -986,19 +977,16 @@ void drawbar(Monitor *m) {
     i++;
   }
 
-#ifndef DWMZ_NO_WP
-  double vshow = 1.0;
-  auto vres = vol.get_result();
-  if(vres) {
-    vshow = vres->volume;
-    if(vres->mute)
-      vshow = 0.0;
+  if (strlen(da_volume)) {
+    double vshow = strtod(da_volume, nullptr);
+    if (vshow < 0) vshow = 0;
+    if (vshow > 5.0) vshow = 5.0;
+    gc.draw_volbar_panel(vshow, layo.volume_, attr, bar::panel_flavor_t::volume);
   }
-  gc.draw_volbar_panel(vshow, layo.volume_, attr, bar::panel_flavor_t::volume);
-#endif
 
-  // TODO draw to custom panel space
-  gc.draw_text_panel(std::string{paneltext[0]}, layo.im_, attr, bar::panel_flavor_t::im);
+  if (strlen(da_input_method)) {
+    gc.draw_text_panel(std::string{da_input_method}, layo.im_, attr, bar::panel_flavor_t::im);
+  }
 
   XPutImage(dpy, m->barwin, drw->gc, &m->barimg, 0, 0, 0, 0, m->ww, bh);
   XSync(drw->dpy, False);
@@ -1452,17 +1440,19 @@ void propertynotify(XEvent *e) {
     if (ev->atom == XA_WM_NAME) {
       updatetextprop(ev->atom, stext, DWMZ_TXT_SZ, "dwmZ");
       return;
-    } else if (ev->atom == dwmzatom[DwmzAtomPanel0Text]) {
-      updatetextprop(ev->atom, paneltext[0], DWMZ_TXT_SZ, "");
+    } else if (ev->atom == dwmzatom[DwmzAtomInputMethod]) {
+      updatetextprop(ev->atom, da_input_method, DWMZ_TXT_SZ, "");
+      if (oldlf != getlayoutflags()) updatebars();
+      drawbars();
       return;
-    } else if (ev->atom == dwmzatom[DwmzAtomPanel1Text]) {
-      updatetextprop(ev->atom, paneltext[1], DWMZ_TXT_SZ, "");
-      return;
-    } else if (ev->atom == dwmzatom[DwmzAtomPanel2Text]) {
-      updatetextprop(ev->atom, paneltext[0], DWMZ_TXT_SZ, "");
+    } else if (ev->atom == dwmzatom[DwmzAtomVolume]) {
+      updatetextprop(ev->atom, da_volume, DWMZ_TXT_SZ, "");
+      if (oldlf != getlayoutflags()) updatebars();
+      drawbars();
       return;
     }
   }
+
   if(ev->state == PropertyDelete)
     return; /* ignore */
   else if((c = wintoclient(ev->window))) {
@@ -1657,13 +1647,6 @@ void timerdrawbars(ev::timer &, int) {
   drainxevent();
 }
 
-static ev::async a_drawbars;
-
-void asyncdrawbars(ev::async &, int) {
-  drawbars();
-  drainxevent();
-}
-
 void run(void) {
   ev::io x_io;
   x_io.set(ConnectionNumber(dpy), ev::READ);
@@ -1673,13 +1656,6 @@ void run(void) {
   ev::timer tim;
   tim.set<&timerdrawbars>();
   tim.start(1., 1.);
-
-  a_drawbars.set<&asyncdrawbars>();
-  a_drawbars.start();
-#ifndef DWMZ_NO_WP
-  vol.on_update([]() { a_drawbars.send(); });
-  vol.run();
-#endif
 
   XEvent ev;
   /* main event loop */
@@ -1850,9 +1826,8 @@ void setup(void) {
   netatom[NetWMWindowType] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
   netatom[NetWMWindowTypeDialog] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
   netatom[NetClientList] = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
-  dwmzatom[DwmzAtomPanel0Text] = XInternAtom(dpy, "DWMZ_PANEL0_TEXT", False);
-  dwmzatom[DwmzAtomPanel1Text] = XInternAtom(dpy, "DWMZ_PANEL1_TEXT", False);
-  dwmzatom[DwmzAtomPanel2Text] = XInternAtom(dpy, "DWMZ_PANEL2_TEXT", False);
+  dwmzatom[DwmzAtomInputMethod] = XInternAtom(dpy, "DWMZ_INPUT_METHOD", False);
+  dwmzatom[DwmzAtomVolume] = XInternAtom(dpy, "DWMZ_VOLUME", False);
   /* init cursors */
   cursor[CurNormal] = drw_cur_create(drw, XC_left_ptr);
   cursor[CurResize] = drw_cur_create(drw, XC_sizing);
@@ -2116,7 +2091,16 @@ void unmapnotify(XEvent *e) {
   }
 }
 
+bar::layout_flag_t getlayoutflags(void) {
+  bar::layout_flag_t ret = 0;
+  if (strlen(da_input_method)) ret |= bar::layout_flags::has_im;
+  if (strlen(da_volume)) ret |= bar::layout_flags::has_volume;
+  return ret;
+}
+
 void updatebars(void) {
+  oldlf = getlayoutflags();
+
   Monitor *m;
   XSetWindowAttributes wa;
   wa.override_redirect = True;
@@ -2133,15 +2117,7 @@ void updatebars(void) {
       m->barwin = XCreateWindow(dpy, root, m->wx, m->by, m->ww, bh, 0, depth, InputOutput, visual,
                                 CWOverrideRedirect | CWBackPixel | CWBorderPixel | CWColormap | CWEventMask, &wa);
     }
-    bar::layout_flag_t flags = 0;
-#ifndef DWMZ_NO_WP
-    flags |= bar::layout_flags::has_volume;
-#endif
-
-    // TODO layout custom panels properly
-    flags |= bar::layout_flags::has_im;
-
-    m->barlayo = bar::layout_wmbar(m->ww, bh, LENGTH(tags), flags);
+    m->barlayo = bar::layout_wmbar(m->ww, bh, LENGTH(tags), oldlf);
     m->bardata.resize(m->ww * bh * 4);
     m->barimg.width = m->ww;
     m->barimg.height = bh;
@@ -2363,9 +2339,8 @@ void updatetextprop(Atom atom, char* dest, size_t sz, const char* deftext) {
 
 void updatealltextprop() {
   updatetextpropvalue(XA_WM_NAME, stext, DWMZ_TXT_SZ, "dwmZ");
-  updatetextpropvalue(dwmzatom[DwmzAtomPanel0Text], paneltext[0], DWMZ_TXT_SZ, "");
-  updatetextpropvalue(dwmzatom[DwmzAtomPanel1Text], paneltext[1], DWMZ_TXT_SZ, "");
-  updatetextpropvalue(dwmzatom[DwmzAtomPanel2Text], paneltext[2], DWMZ_TXT_SZ, "");
+  updatetextpropvalue(dwmzatom[DwmzAtomInputMethod], da_input_method, DWMZ_TXT_SZ, "");
+  updatetextpropvalue(dwmzatom[DwmzAtomVolume], da_volume, DWMZ_TXT_SZ, "");
   drawbar(selmon);
 }
 

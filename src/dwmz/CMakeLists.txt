@@ -19,11 +19,5 @@ target_link_libraries(dwmz PRIVATE
   Threads::Threads
 )
 
-if(${WITH_WP})
-  target_link_libraries(dwmz PRIVATE PkgConfig::WirePlumber)
-else()
-  target_compile_definitions(dwmz PRIVATE DWMZ_NO_WP)
-endif()
-
 install(TARGETS dwmz)
 
